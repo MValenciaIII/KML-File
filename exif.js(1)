@@ -1,0 +1,67 @@
+'use strict';
+function getEXIF() {
+    var altitude = 10;
+    var noExif = 0;
+    Promise.all(readFiles(document.getElementById('file'))).then(function (photos) {
+        var kmlDocument = new Document("Geotagged Photos");
+        kmlDocument.styles.push(new Style("camera").setIconStyle("", "", ":/camera_mode.png"));
+        photos.filter(function (photo) {
+            return typeof photo !== 'undefined';
+        }).forEach(function (photo) {
+            var camera = new Camera(photo.longitude, photo.latitude, altitude, 0, 90, 0);
+            var point = new Point([new Coordinate(photo.latitude, photo.longitude, altitude)]);
+            var photoOverlay = new PhotoOverlay(photo.filename, photo.filename, camera, point);
+            photoOverlay.styleUrl = "camera";
+            photoOverlay.setViewVolume(10, photo.lf, photo.rf, -20, 20);
+            kmlDocument.features.push(photoOverlay);
+        });
+        download("Geotagged Photos.kml", Kml.wrapKml(kmlDocument));
+    });
+}
+function readFiles(fileControl) {
+    if (!(window.File && window.FileReader && window.FileList && window.Blob)) {
+        alert('The File APIs are not fully supported in this browser.');
+        reject();
+    }
+    var files = Array.from(fileControl.files);
+    if (files.length === 0) {
+        alert("Please select a file.");
+        reject();
+    }
+    return files.map(function (f) {
+        return new Promise(function (resolve, reject) {
+            var onload = (function (theFile) {
+                return function () {
+                    var photo = {
+                        filename: theFile.name
+                    };
+                    var exifData = this.exifdata;
+                    if (typeof exifData.GPSLatitude === 'undefined' || typeof exifData.GPSLongitude === 'undefined') {
+                        alert("No GPS data found in photo: " + photo.filename);
+                        resolve();
+                    } else {
+                        photo.latitude = DMStoDecimal(exifData.GPSLatitude);
+                        photo.longitude = DMStoDecimal(exifData.GPSLongitude);
+                        if (exifData.GPSLatitudeRef === 'S') photo.latitude *= -1;
+                        if (exifData.GPSLongitudeRef === 'W') photo.longitude *= -1;
+                        if (exifData.PixelXDimension !== undefined && exifData.PixelYDimension !== undefined) {
+                            photo.width = exifData.PixelXDimension;
+                            photo.height = exifData.PixelYDimension;
+                            photo.lf = photo.width / photo.height * -20.0;
+                            photo.rf = photo.width / photo.height * 20.0;
+                        } else {
+                            photo.lf = -20;
+                            photo.rf = 20;
+                        }
+                        photo.altitude = exifData.GPSAltitude.numerator / exifData.GPSAltitude.denominator;
+                        resolve(photo);
+                    }
+                };
+            })(f);
+            EXIF.getData(f, onload);
+        });
+    });
+}
+function DMStoDecimal(dms) {
+    return dms[0].numerator / dms[0].denominator + dms[1].numerator / dms[1].denominator / 60 + dms[2].numerator / dms[2].denominator / 3600;
+}
